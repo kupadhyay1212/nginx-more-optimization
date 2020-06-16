@@ -1,0 +1,271 @@
+selinux disabled
+firewall disable
+
+https://medium.com/@karljohnson/nginx-more-get-http-2-with-alpn-pagespeed-modsecurity-and-much-more-in-one-single-package-7d28a44d1854
+
+######swap from nginx to nginx-more######
+1. yum install https://repo.aerisnetwork.com/stable/centos/7/x86_64/aeris-release-1.0-4.el7.noarch.rpm -y
+2. yum swap nginx nginx-more
+
+php7.0 -remi
+https://www.tecmint.com/install-php-7-in-centos-7/
+yum install php php-json php-mysqlnd php-opcache php-common php-cli php-zip php-fpm php-soap php-mcrypt php-pdo php-bcmath php-mbstring php-tcpdf php-gd php-xml -y
+
+install phpMyAdmin
+https://www.phpmyadmin.net/downloads/
+wget --link---
+wget https://files.phpmyadmin.net/phpMyAdmin/4.9.2/phpMyAdmin-4.9.2-all-languages.zip
+untar it .(make the location of phpmyadmin in nginx conf file)
+or
+yum install phpMyAdmin (set the location in nginx conf file. default=/usr/share/nginx)
+
+cd phpMyAdmin
+ mv config.sample.inc.php config.inc.php
+  vi config.inc.php 
+
+if session error occurs then:
+sudo chmod 777 /var/lib/php/session/
+
+mysql5.6
+https://www.linode.com/docs/databases/mysql/how-to-install-mysql-on-centos-7/
+create user 'db_ntc'@'%' identified by 'ntc@123'; 
+{note: % instead of localhost means : remotely can be accessible}
+GRANT ALL PRIVILEGES ON *.* TO 'db_ntc'@'%';
+
+directly create and grant permission;
+grant all on cibnepal.* to 'cibuser'@'%' identified by 'cib@1234';
+
+To list all user in mysql database
+SELECT User FROM mysql.user;
+
+----------------------------edit- php file---------------------------------------------------------------------------------
+vi  /etc/php-fpm.d/www.conf
+user=nginx
+group=nginx
+listen = /var/run/php-fpm.sock;
+
+listen.owner = nginx
+listen.group = nginx
+listen.mode = 0660
+
+restart php-fpm
+-----------------------------------------edit-nginx.conf----------------------------------------------------
+vi /etc/nginx/nginx.conf
+
+comment 
+#vhost_traffic_status_zone
+more_set_headers 'Server: NTApp';
+
+	upstream php {
+#		server 127.0.0.1:9000;
+		server unix:/var/run/php-fpm.sock;
+}
+comment all server block
+
+vi /etc/nginx/conf.d/vhost/test.conf
+
+server {
+	listen 80;
+	server_name 202.70.67.69;
+	server_name _;
+	root /home/ntapp/public_html;
+	access_log /var/log/nginx/ntapp-access_log main;
+	error_log /var/log/nginx/ntapp-error_log warn;
+
+	if ($bad_bot) { return 444; }
+
+	location ~ \.php$ {
+		include fastcgi_params;
+		fastcgi_param SCRIPT_FILENAME $request_filename;
+		fastcgi_pass unix:/var/run/php-fpm.sock;
+	}
+
+
+	#include conf.d/custom/pagespeed.conf;
+	include conf.d/custom/fpm-default.conf;
+	include conf.d/custom/restrictions.conf;
+}
+----------------------------------------------------------------------------------------
+
+*************optimize php:
+vi /etc/php.ini
+max_execution_time  = 300	
+max_file_uploads	 = 200
+memory_limit = 3G
+upload_max_filesize = 8M
+
+restart php-fpm
+-------------------------------------------------------------import & export db-------------------------------
+export: 
+mysqldump -u [uname] -p[pass] db_name > db_backup.sql
+
+import:
+mysql -u username -p password db_name < file.sql
+or
+mysql> use db_name;
+ mysql> source file_name.sql;
+
+**************-optimize db-----------------------------
+https://tools.percona.com/
+generate my.cnf file and replcae to /etc/my.cnf
+optional:-->
+#max-connection -> replcae with -> max_connection
+*correct log file location
+
+also,
+vi /etc/systemd/system/mysql.service
+add to bottom:
+LimitNOFILE=infinity
+LimitMEMLOCK=infinity
+
+restart mysql
+
+-----------------------------------------optimize php-fpm------------------------------------------------
+vi /etc/php-fpm.d/www.conf
+
+pm.max_children = 4000 
+pm.start_servers = 64       
+pm.min_spare_servers = 32   
+pm.max_spare_servers = 64 
+
+descriptions::::::::::::::::::::::::::::::::::
+pm= static/dynamic
+pm.max_children=hard-limit total number of processes allowed
+pm.stat_servers=When php-fpm starts, have this many processes waiting for requests
+pm.min_spare_servers=Number spare processes php-fpm will create
+pm.max_spare_servers=Max number of spare (waiting for connections) processes allowed to be created
+pm.max_requests=kills and respawns processes after handling a certain number of requests
+
+****----test using ab: (apache benchmark)------****
+ab -n 10000 -c 200 http://localhost/index.php
+n=number of request
+c=concurrency(no of users)
+-k=This does the "KeepAlive" funcionality browsers do by nature. You don't need to pass a value for -k as it it "boolean"
+
+
+----------------------optimize sysctl.conf----------------------------------
+Here, swapiness value determines the level of swapping from memory to swap area.
+default: swapiness=60
+0- no swapping
+100-agressive swapping
+(10/20/30-recommended according to process)
+view: 
+cat /proc/sys/vm/swappiness
+change temporary:
+sudo sysctl vm.swappiness=10
+change permanent:
+vi /etc/sysctl.conf
+vm.swappiness=10
+reboot 
+
+add to bottom;
+vi /etc/sysctl.d/00.sysctl.conf:
+
+#fs.file-max = 150000
+net.core.netdev_max_backlog=32768
+net.core.optmem_max=20480
+#net.core.rmem_default=65536
+#net.core.rmem_max=16777216
+net.core.somaxconn=50000
+#net.core.wmem_default=65536
+#net.core.wmem_max=16777216
+net.ipv4.tcp_fin_timeout=120
+#net.ipv4.tcp_keepalive_intvl=30
+#net.ipv4.tcp_keepalive_probes=3
+#net.ipv4.tcp_keepalive_time=120
+net.ipv4.tcp_max_orphans=262144
+net.ipv4.tcp_max_syn_backlog=524288
+net.ipv4.tcp_max_tw_buckets=524288
+#net.ipv4.tcp_mem=1048576 1048576 2097152
+#net.ipv4.tcp_no_metrics_save=1
+net.ipv4.tcp_orphan_retries=0
+#net.ipv4.tcp_rmem=4096 16384 16777216
+#net.ipv4.tcp_synack_retries=2
+net.ipv4.tcp_syncookies=1
+#net.ipv4.tcp_syn_retries=2
+#net.ipv4.tcp_wmem=4096 32768 16777216
+
+
+
+--------------at /<root direcotry>/application/config/database.php---------
+put db_name, db_username, db_password
+also, put server IP.
+
+at <root direcotry>/application/config/config.php,
+see the url to put
+
+
+####################################################
+---------------------------------nginx-vhost----with php-myadmin-------------
+server {
+	listen 80;
+	server_name 202.70.67.66;
+	root /home/ntapp/public_html;
+	access_log /var/log/nginx/ntapp-access_log main;
+	error_log /var/log/nginx/ntapp-error_log warn;
+
+	if ($bad_bot) { return 444; }
+	
+	location /ntapp {
+        alias /home/ntapp/public_html/ntapp;
+        try_files $uri $uri/ @ntapp;
+        
+        }
+
+    location @ntapp {
+        rewrite /ntapp/(.*)$ /ntapp/index.php?/$1 last;
+    }
+
+	location ~ \.php$ {
+		include fastcgi_params;
+		fastcgi_param SCRIPT_FILENAME $request_filename;
+		fastcgi_pass unix:/var/run/php-fpm.sock;
+	}
+
+#---------------phpMyAdmin-----------------------
+        location /phpMyAdmin {
+	 	alias /opt/phpMyAdmin;
+       		index  index.php;
+
+
+## Images and static content is treated different
+        location ~* ^.+.(jpg|jpeg|gif|css|png|js|ico|xml)$ {
+      		access_log        off;
+       		expires           30d;
+        }
+
+        location ~ /\.ht {
+        	deny  all;
+        }
+
+        location ~ /(libraries|setup/frames|setup/libs) {
+        	deny all;
+      		return 404;
+        }
+
+        location ~ \.php$ {
+       		 include /etc/nginx/fastcgi_params;
+        	fastcgi_pass unix:/var/run/php-fpm.sock;
+        	fastcgi_index index.php;
+        	fastcgi_param SCRIPT_FILENAME /opt$fastcgi_script_name;
+        }
+}
+#-------Phpmyadmin Close--------------------------------
+
+
+	#include conf.d/custom/pagespeed.conf;
+	include conf.d/custom/fpm-default.conf;
+	include conf.d/custom/restrictions.conf;
+}
+
+
+php - public_html/system/core core/Common.php **error:**
+before:
+return $_config[0] =& $config;
+after:
+$_config[0] =& $config;
+return $_config[0];
+
+at php.ini:
+date.timezone = "Asia/Kathmandu" 
+
