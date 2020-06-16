@@ -199,7 +199,7 @@ see the url to put
 ---------------------------------nginx-vhost----with php-myadmin-------------
 server {
 	listen 80;
-	server_name 202.70.67.66;
+	server_name localhost;
 	root /home/ntapp/public_html;
 	access_log /var/log/nginx/ntapp-access_log main;
 	error_log /var/log/nginx/ntapp-error_log warn;
